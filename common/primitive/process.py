@@ -26,14 +26,14 @@ class ProcessSpec:
         '''
         berv = self._spec.header['eso drs berv']
         dlamb = np.sqrt((1+berv/mc.C_SPEED)/(1-berv/mc.C_SPEED))
-        for order in self._ret_spec.NOrder: 
+        for order in range(self._ret_spec.NOrder): 
             self._ret_spec.shift_wave(dlamb, order)
     
     def run(self) -> type(sp.Spec):
         '''
         
         '''
-        
+        self.bary_correct()
         return self._ret_spec
 
 

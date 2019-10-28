@@ -51,6 +51,7 @@ class Spec:
             # a file is specified, so read data from that file 
             # prioritize data from file, so overlook any xy data 
             self.read_from(filename)
+            self.julian_day = self.header['eso drs bjd']
             self.flag['from_file'] = True
         elif data != None:
             # no filename is specified and a set of data is provided
@@ -114,7 +115,7 @@ class Spec:
             # First record relevant header information 
             self.header = hdu_list[HDU].header
             self._spec = hdu_list[HDU].data
-            self.NOrder, self.NPixel = self._spec.shape()
+            self.NOrder, self.NPixel = self._spec.shape
             # Generate wavelength values for each order
             for order in range(self.NOrder):
                 self._wave[order] = self._gen_wave(order)
@@ -180,12 +181,13 @@ class Spec:
                    comment: str='', 
                    color: str='g') ->plt.Figure:
         ''' '''
-        fig = plt.figure()
+        # fig = plt.figure()
         plt.plot(self._wave[order], self._spec[order], 
                  label=comment,
-                 color=color)
+                 color=color,
+                 linewidth=0.5)
         plt.legend()
-        return fig
+        # return fig
 
     def shift_wave(self, a: float, order: int) -> None: 
         ''' 
