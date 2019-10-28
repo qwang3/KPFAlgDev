@@ -1,8 +1,59 @@
 import numpy as np
 import scipy.interpolate as ip
+import matplotlib.pyplot as plt
 
 from common import macro as mc
+from common.primitive import process as pc
 from common.argument import spec as sp
+
+
+def prob_for_prelim(flist):
+    ''' find the file with the highest mean flux'''
+    best_file = None, 
+    best_val = 0
+    for f in flist:
+        S = sp.Spec(filename=f)
+        mean = np.mean(S._spec)
+        if mean > best_val:
+            best_val = mean
+            best_file = f
+    return best_file
+
+def make_template(prelim, flist):
+    '''
+    based on the files given in flist, create a tempkate 
+    as specified in the HAPRS-TERRA paper. 
+    [prelim] becomes the preliminary template 
+    '''
+    SP = sp.Spec(filename=prelim)
+    P = pc.ProcessSpec(SP)
+    SSP = P.run()
+
+    n_files = len(flist)
+
+    twave = SSP._wave
+    tspec = np.divide(SSP._spec, n_files)
+
+    # Currently just a average of all spectrum
+    # should also be taking care of the outliers (3-sigma clipping)
+    for f in range(n_files):
+        S = sp.Spec(filename=flist[f])
+        p = pc.ProcessSpec(SP)
+        SS = p.run()
+        T = TFA(SSP, SS)
+        a, err, success, iteration = T.run(3)
+
+        for i, order in enumerate(mc.ord_range):
+            SS.shift(a[i], order)
+            if success[i] == True:
+                flamb, fspec = SS.get_order(order)
+                fspec2 = np.interp(twave[order, :], flamb, fspec)
+                tspec[order, :] += fspec2
+            else: 
+                n_files -= 1
+    tspec = np.divide(tspec, n_files)
+
+    return sp.Spec(data=(twave, tspec))
 
 class TFA:
 
@@ -12,6 +63,7 @@ class TFA:
         '''
         self.temp = temp
         self.obs = obs
+
     def run(self, m:int):
         '''
 
@@ -67,7 +119,7 @@ class TFA:
         assert(flamb.size == fspec.size)
 
         av_lamb = np.multiply(a[0], tlamb)
-        # overlapping interval between template (F) and observed(f)
+        # overlapping interval between tspec (F) and observed(f)
         # we can only compare the two in this interval
         # print(av_lamb.size, flamb.size)
         lamb, w= self.common_range(flamb, av_lamb, w0)
@@ -81,7 +133,7 @@ class TFA:
 
 
         # create f[lamb]*sum(a_m * (lamb - lamb_c)) in eqn 1
-        am = a[1:]                     # polynomial coefficients [a_0, a_1, ... a_m]
+        am = a[1:]            # polynomial coefficients [a_0, a_1, ... a_m]
         c = int(lamb.size/2)  # index for center wavelength of each order
         px = lamb - lamb[c]
         # np.polyval is setup as:
@@ -196,6 +248,7 @@ class TFA:
             # print('[{}] converged at iteration {}, a = {} k ={}'.format(order, iteration,a[0], k) )
         # Return alpha_v, signma_v (see eqn 9)
         return a, err_v, success, iteration
+
 
 if __name__ == '__main__':
     pass

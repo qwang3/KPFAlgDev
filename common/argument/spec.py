@@ -34,6 +34,7 @@ class Spec:
         self._spec = np.zeros(mc.ECHELLE_SHAPE)
         self.NOrder = mc.ECHELLE_SHAPE[0]
         self.NPixel = mc.ECHELLE_SHAPE[1]
+        self.julian_day = 0
 
         # If the data is generated from a .fits file, 
         # self.filename contains the .fits file destination 
@@ -55,11 +56,8 @@ class Spec:
             self.flag['from_file'] = True
         elif data != None:
             # no filename is specified and a set of data is provided
-            if data is not mc.EchellePair_TYPE: 
-                # data must be 2xn numpy arrays
-                msg = 'data must be of size 2xn numpy arrays (type mc.Echellepair_TYPE)'
-                raise ValueError(msg)
-            elif data[0].shape != data[1].shape:
+
+            if data[0].shape != data[1].shape:
                 # size of wave data must be same as flux data
                 msg = 'size of data[0] (wave) and data[1] must be same, \
                         but have size {}, {}'.format(
@@ -124,7 +122,7 @@ class Spec:
         '''
         Take the current data and write to a .fits file
         '''
-        if self.flag['from_file'] != True or self.flag['from_array'] != True:
+        if self.flag['from_file'] != True and self.flag['from_array'] != True:
             msg = 'Can only write to file when not empty!'
             raise ValueError(msg)
         if fname.endswith('.fits') == False:
@@ -143,6 +141,9 @@ class Spec:
         deg_key = 'hierarch eso drs cal th deg ll'
         hdu_header.set(deg_key, deg)
 
+        hdu_header.set('hierarch eso drs berv', 0)
+        hdu_header.set('hierarch eso drs bjd', self.julian_day)
+
         # Record polynomial interpolation results to headers
         for order in range(self.NOrder):
             c = np.polyfit(np.arange(self.NPixel), self._wave[order], deg)
@@ -158,7 +159,7 @@ class Spec:
         ''' '''
         # Create flux normalization polynomials
         c = int(self._wave[order].size/2)
-        am = np.flip(a)
+        am = np.flip(a[1:])
         px = self._wave[order] - self._wave[order, c]
         norm = np.polyval(am, px)
 
