@@ -15,29 +15,29 @@ class ProcessSpec:
     '''
     Action Object class that process the input spec
     '''
-    def __init__(self, spec: type(sp.Spec)):
+    def __init__(self):
+        '''
 
-        self._spec = spec
-        self._ret_spec = spec.copy()
+        '''
     
-    def bary_correct(self) -> None: 
+    def bary_correct(self, spec: sp.Spec) -> sp.Spec: 
         '''
 
         '''
-        berv = self._spec.header['eso drs berv']
+        berv = spec.header['eso drs berv']
         dlamb = np.sqrt((1+berv/mc.C_SPEED)/(1-berv/mc.C_SPEED))
-        for order in range(self._ret_spec.NOrder): 
-            self._ret_spec.shift_wave(dlamb, order)
+        for order in range(spec.NOrder): 
+            spec.shift_wave(dlamb, order)
+
+        return spec
     
-    def run(self) -> type(sp.Spec):
+    def run(self, spec: sp.Spec) -> sp.Spec:
         '''
         
         '''
-        self.bary_correct()
-        return self._ret_spec
+        spec = self.bary_correct(spec)
+        return spec
 
 
 if __name__ == '__main__':
-    S = sp.Spec()
-    P = ProcessSpec(S)
     pass

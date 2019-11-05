@@ -167,8 +167,8 @@ class Spec:
         av = np.divide(1, a[0])
 
         # shift wavelength and flux accordingly 
-        self._wave *= av
-        self._spec *= norm
+        self._wave[order] *= av
+        self._spec[order] *= norm
 
     def resample(self, resolution: float) -> None:
         ''' '''

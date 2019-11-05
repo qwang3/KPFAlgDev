@@ -6,6 +6,8 @@ import sys
 
 ECHELLE_SHAPE = [72, 4096]
 C_SPEED = 2.99792458e5 # [km/s] speed of light
+SEC_ACC = 4.493 # [km/s^2] acceleration
+
 
 # Data type
 EchelleData_TYPE = tp.NewType('EchelleData_TYPE', np.ndarray)
@@ -14,8 +16,9 @@ EchellePair_TYPE = tp.Tuple[EchelleData_TYPE, EchelleData_TYPE]
 # Result type
 ALPHA_TYPE = tp.NewType('alpha_TYPE', np.ndarray)
 
-ord_range = [i for i in range(71) if i > 20 and i != 57 and i != 66 ]
+ord_range = [i for i in range(71) if i > 24 and i != 57 and i != 66 ]
 # Some helpful general purpose function
+
 def findfiles(fpath, extension):
     '''
     find all the files in the sub directories with relevant extension

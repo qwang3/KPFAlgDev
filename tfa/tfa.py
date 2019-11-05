@@ -5,10 +5,15 @@ import matplotlib.pyplot as plt
 from common import macro as mc
 from common.primitive import process as pc
 from common.argument import spec as sp
+from common.argument import tfa_res as tr
+from common.primitive import rm_outlier as rmo
 
-
-def prob_for_prelim(flist):
-    ''' find the file with the highest mean flux'''
+# Opterations necessary for the entire template fitting algorithm
+def prob_for_prelim(flist: list) -> str:
+    ''' 
+    find the file with the highest mean flux
+    this file is used as the preliminary template
+    '''
     best_file = None, 
     best_val = 0
     for f in flist:
@@ -19,32 +24,36 @@ def prob_for_prelim(flist):
             best_file = f
     return best_file
 
-def make_template(prelim, flist):
+def make_template(prelim: str, flist: list, m:int) -> sp.Spec:
     '''
     based on the files given in flist, create a tempkate 
     as specified in the HAPRS-TERRA paper. 
     [prelim] becomes the preliminary template 
     '''
+    # Initilaize data processing methods
+    P = pc.ProcessSpec()
+    # Initialize the preliminary as the template
     SP = sp.Spec(filename=prelim)
-    P = pc.ProcessSpec(SP)
-    SSP = P.run()
+    SP = P.run(SP) 
 
     n_files = len(flist)
-
-    twave = SSP._wave
-    tspec = np.divide(SSP._spec, n_files)
+    # get the wavelength and specs of the preliminary  
+    # as foundation to the template
+    twave = SP._wave
+    tspec = SP._spec
 
     # Currently just a average of all spectrum
     # should also be taking care of the outliers (3-sigma clipping)
-    for f in range(n_files):
-        S = sp.Spec(filename=flist[f])
-        p = pc.ProcessSpec(SP)
-        SS = p.run()
-        T = TFA(SSP, SS)
-        a, err, success, iteration = T.run(3)
+    for file in flist:
+        S = sp.Spec(filename=file)
+        SS = P.run(S)
+        T = TFA(SP, SS, m)
+        res = T.run()
 
         for i, order in enumerate(mc.ord_range):
-            SS.shift(a[i], order)
+            a = res.get_alpha()
+            success = res.get_success()
+
             if success[i] == True:
                 flamb, fspec = SS.get_order(order)
                 fspec2 = np.interp(twave[order, :], flamb, fspec)
@@ -52,43 +61,35 @@ def make_template(prelim, flist):
             else: 
                 n_files -= 1
     tspec = np.divide(tspec, n_files)
-
     return sp.Spec(data=(twave, tspec))
 
 class TFA:
 
-    def __init__(self, temp: type(sp.Spec), obs: type(sp.Spec)):
+    def __init__(self, temp: sp.Spec, obs: sp.Spec, m: int):
         '''
-
+        Constructor
         '''
         self.temp = temp
         self.obs = obs
 
-    def run(self, m:int):
-        '''
+        self.m = m
+        self.res = tr.TFAResult(m, obs.julian_day)
+        self.outlier = rmo.RemoveOutlier()
 
+    def run(self):
         '''
-        n_res = len(mc.ord_range)
-        a_res = np.ones([n_res, m+2])
-        err_v = np.ones([n_res, m+2])
-        success = np.zeros_like(mc.ord_range)
-        iteration = np.zeros_like(mc.ord_range)
-
+        Run the template fitting algorithm 
+        '''
         for i, order in enumerate(mc.ord_range): 
-            a, err, s, it = self.solve_order(order, m)
-            a_res[i] = a
-            err_v[i] = err
-            success[i] = s
-            iteration[i] = it
-        
-        return a_res, err_v, success, iteration
+            a, err, s, it = self.solve_order(order)
+            self.res.append(a, err, s, it)
+        return self.res
         
 
     def common_range(self, x, y, w) -> mc.EchellePair_TYPE:
         '''
         
         '''
-
         idx = np.where(np.logical_and(
             x < np.amax(y),
             x > np.amin(y)
@@ -112,20 +113,11 @@ class TFA:
         # Observed data
         flamb ,fspec = self.obs.get_order(order)
 
-        m = len(a) - 2
-
-        assert(tlamb.size == tspec.size)
-        assert(tspec.size == fspec.size)
-        assert(flamb.size == fspec.size)
-
         av_lamb = np.multiply(a[0], tlamb)
         # overlapping interval between tspec (F) and observed(f)
         # we can only compare the two in this interval
         # print(av_lamb.size, flamb.size)
         lamb, w= self.common_range(flamb, av_lamb, w0)
-        if lamb.size == 0:
-            print('no overlapping intervals!')
-            return (0, [-1], [1])
         tckF = ip.splrep(av_lamb, tspec)
         tckf = ip.splrep(flamb,fspec)
         F_av = ip.splev(lamb, tckF)
@@ -147,11 +139,6 @@ class TFA:
         
         # Final form of eqn 1
         R = F_av - f_corr
-        try: 
-            assert(R.size >0)
-        except(AssertionError):
-            print(R.size)
-            print('how did this happen?')
 
         ## calculate partial derivatives
         # eqn 3-4
@@ -161,16 +148,16 @@ class TFA:
 
         dF = np.multiply(lamb, grad)
         dR_dm.append(dF)
-        for i in np.arange(m+1):
+        for i in np.arange(self.m+1):
             dR_dm.append(-np.multiply(f, np.power(px, i)))
 
         ## setup hessian and eqn 8:
         #  summing all of pixels (res * 4096 * 76) in matrix
-        A_lk = np.zeros((m+2, m+2))
-        b_l = np.zeros((m+2, 1))
+        A_lk = np.zeros((self.m+2, self.m+2))
+        b_l = np.zeros((self.m+2, 1))
         # eqn 6 & 15
-        for i in np.arange(0, m+2):
-            for j in np.arange(0, m+2):
+        for i in np.arange(0, self.m+2):
+            for j in np.arange(0, self.m+2):
                 A_lk[i, j] = np.sum(np.multiply(w,
                              np.multiply(dR_dm[i], dR_dm[j])))
             b_l[i] = -np.sum(np.multiply(w, np.multiply(dR_dm[i], R)))
@@ -178,7 +165,7 @@ class TFA:
         da = np.linalg.solve(A_lk, b_l)
         return da, R, A_lk
 
-    def solve_order(self, order: int, m: int): 
+    def solve_order(self, order: int): 
         '''
 
         '''
@@ -192,8 +179,8 @@ class TFA:
         success = True
 
         # Initial alpha
-        a = np.asarray([1,1] + [0] *m, dtype=np.float64)
-        da = np.asarray([np.inf]*(m+2), dtype=np.float64)
+        a = np.asarray([1,1] + [0] *self.m, dtype=np.float64)
+        da = np.asarray([np.inf]*(self.m+2), dtype=np.float64)
         # Keep track of number of iterations to convergence
         iteration = 0
         # Convergence criteria
@@ -223,13 +210,8 @@ class TFA:
             err_v = np.multiply(error[0], mc.C_SPEED)
 
             # remove outlier
-            # might implement this as a function later
-            # R_mu = np.mean(R)
-            # up = R_mu + np.multiply(4.0, R_sig)
-            # down = R_mu - np.multiply(4.0, R_sig)
-            # bad = np.where(np.logical_or(np.greater((R-R_mu-up), np.zeros((R-R_mu-up).shape))
-            #                 ,np.less((R-R_mu-down), np.zeros((R-R_mu-down).shape))))
-            # w[bad] = 0
+            bad = self.outlier.sigma_clip(R, 4)
+            w[bad] = 0
 
             # record:
             # --TODO--
@@ -239,14 +221,11 @@ class TFA:
                 # print("[{}] Failed: Infinite loop".format(order))
                 success = False
                 break
+
             converge = abs(da[0]*mc.C_SPEED) < 1e-6
-            for i in range(0, m):
+            for i in range(0, self.m+1):
                 converge &= abs(da[i+1]*mc.C_SPEED) < 1e-6
-        if success:
-            pass
-            # print(R)
-            # print('[{}] converged at iteration {}, a = {} k ={}'.format(order, iteration,a[0], k) )
-        # Return alpha_v, signma_v (see eqn 9)
+
         return a, err_v, success, iteration
 
 
