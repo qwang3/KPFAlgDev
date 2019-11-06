@@ -53,7 +53,6 @@ def make_template(prelim: str, flist: list, m:int) -> sp.Spec:
         for i, order in enumerate(mc.ord_range):
             a = res.get_alpha()
             success = res.get_success()
-
             if success[i] == True:
                 flamb, fspec = SS.get_order(order)
                 fspec2 = np.interp(twave[order, :], flamb, fspec)
@@ -190,7 +189,11 @@ class TFA:
         while not converge: # convergence criteria specified in 2.1.5
             # solve
             w = self.correct(w)
-            da, R, A_lk = self.solve_step(order, a, w)
+            try:
+                da, R, A_lk = self.solve_step(order, a, w)
+            except(np.linalg.LinAlgError):
+                success = False
+                break
             if len(R) == 1:
                 # This happens when a initial guess is too far from the minimum
                 success = False

@@ -6,7 +6,7 @@ import sys
 
 ECHELLE_SHAPE = [72, 4096]
 C_SPEED = 2.99792458e5 # [km/s] speed of light
-SEC_ACC = 4.493 # [km/s^2] acceleration
+SEC_ACC = 4.49e-3 # [km/s^2] acceleration
 
 
 # Data type

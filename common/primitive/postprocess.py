@@ -61,13 +61,17 @@ class PostProcess:
             # eqn 10, 11
             rv = res.rv
             bad = self.correct.sigma_clip(res.rv, 2)
-            rv[bad] = 0
             
-            sig2 = np.square(res.get_error())
-            Z = np.sum(np.reciprocal(sig2))
-            mu_e = np.sum(np.divide(rv, sig2))/Z
+            weight = np.divide(1, np.square(res.get_error()))
+            # weight is 1xn row array, while rv is nx1 column vector
+            weight = np.reshape(weight, rv.shape)
+            # remove outliers
+            bad = self.correct.sigma_clip(res.rv, 2)
+            weight[bad] = 0
+            
+            Z = np.sum(weight)
+            mu_e = np.sum(np.multiply(rv, weight))/Z
             err = np.mean(res.get_error())
-
 
             # sec acc correct
             year = np.divide(res.julian_day - jd0, 365.25)

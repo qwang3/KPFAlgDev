@@ -39,10 +39,10 @@ class TFAResult:
         if self.ran: 
             res = [a, e, s, ith]
             self.result = np.vstack([self.result, res])
-            self.rv = np.vstack([self.rv, (1-a[0])*mc.C_SPEED*1000])
+            self.rv = np.vstack([self.rv, (1-a[0])*mc.C_SPEED])
         else: 
             self.result = [a, e, s, ith]
-            self.rv = (1-a[0])*mc.C_SPEED*1000
+            self.rv = (1-a[0])*mc.C_SPEED
             self.ran = True
     
     def get_alpha(self):
@@ -66,5 +66,5 @@ class TFAResult:
         ith = np.mean(self.result[:, 3])
         msg = '[{:6d}] RV={:7.3f}, sig={:.3f}, mean converge {:.3f}'.format(
             int(self.julian_day), a[0], err[0], ith)
-        print(msg)
+        return msg
     
