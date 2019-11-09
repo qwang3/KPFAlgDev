@@ -2,3 +2,5 @@ astropy
 matplotlib
 numpy
 scipy
+pandas
+xlsxwriter

@@ -1,9 +1,14 @@
 import numpy as np
 import scipy.interpolate as ip
-import matplotlib.pyplot as plt
+import configparser as cp
+import pandas as pd
+
+import sys
+import logging
 
 from common import macro as mc
 from common.primitive import process as pc
+from common.primitive import postprocess as ppc
 from common.argument import spec as sp
 from common.argument import tfa_res as tr
 from common.primitive import rm_outlier as rmo
@@ -24,64 +29,183 @@ def prob_for_prelim(flist: list) -> str:
             best_file = f
     return best_file
 
-def make_template(prelim: str, flist: list, m:int) -> sp.Spec:
-    '''
-    based on the files given in flist, create a tempkate 
-    as specified in the HAPRS-TERRA paper. 
-    [prelim] becomes the preliminary template 
-    '''
-    # Initilaize data processing methods
-    P = pc.ProcessSpec()
-    # Initialize the preliminary as the template
-    SP = sp.Spec(filename=prelim)
-    SP = P.run(SP) 
+class Debugger:
+    # a class used by the TFA for debugging purposes 
 
-    n_files = len(flist)
-    # get the wavelength and specs of the preliminary  
-    # as foundation to the template
-    twave = SP._wave
-    tspec = SP._spec
+    def __init__(self, m):
+        '''
+        constructor
+        '''
+        self.m = m
+        self.running = False 
+        self.xlsx_writer = None
+    
+    def __del__(self):
+        if self.xlsx_writer != None:
+            self.xlsx_writer.save()
+            self.xlsx_writer.close()
+    
+    def start(self, fname: tuple, debug_path: str, order: list) -> None: 
+        '''
+        start the debugger class 
+        '''
+        self.obs_name, self.temp_name = fname
+        self.path = debug_path
+        self.xlsx_writer = pd.ExcelWriter(self.path, engine='xlsxwriter')
+        self.result = {}
+        for o in order:
+            self.result[o] = tr.TFADebugRes(o, self.m)
+        
+        self.running = True
+        
+    def append_result(self, order: int, iteration:int, result: list) -> None:
+        '''
+        record the intermediate results
+        '''
+        if self.running:
+            assert(len(result) == 6)
+            self.result[order].append(iteration, result)
+    
+    def log_exit(self, order: int, msg:str) -> None:
+        '''
+        exit status and message for a specific order
+        '''
+        if self.running:
+            self.result[order].log_exit(msg)
+    
+    def record(self, order: int, name:str) -> None:
+        '''
+        
+        '''
+        if self.running:
+            self.result[order].record(self.xlsx_writer)
 
-    # Currently just a average of all spectrum
-    # should also be taking care of the outliers (3-sigma clipping)
-    for file in flist:
-        S = sp.Spec(filename=file)
-        SS = P.run(S)
-        T = TFA(SP, SS, m)
-        res = T.run()
+class Logger: 
 
-        for i, order in enumerate(mc.ord_range):
-            a = res.get_alpha()
-            success = res.get_success()
-            if success[i] == True:
-                flamb, fspec = SS.get_order(order)
-                fspec2 = np.interp(twave[order, :], flamb, fspec)
-                tspec[order, :] += fspec2
-            else: 
-                n_files -= 1
-    tspec = np.divide(tspec, n_files)
-    return sp.Spec(data=(twave, tspec))
+    def __init__(self):
+        '''
 
-class TFA:
+        '''
+        self.running = False
+    
+    def get_level(self, lvl:str):
+        '''
+        read the logging level (string) from config file and return 
+        the corresponding logging level
+        '''
+        if lvl == 'debug': return logging.DEBUG
+        elif lvl == 'info': return logging.INFO
+        elif lvl == 'warning': return logging.WARNING
+        elif lvl == 'error': return logging.ERROR
+        elif lvl == 'critical': return logging.CRITICAL
+        else: return logging.NOTSET
 
-    def __init__(self, temp: sp.Spec, obs: sp.Spec, m: int):
+    def start(self, log_path: str, lvl: str, verbose: bool):
+        '''
+        starting the logging instance 
+        '''
+        # basic logger instance
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(self.get_level(lvl))
+        formatter = logging.Formatter('%(levelname)s - %(message)s')
+        f_handle = logging.FileHandler(log_path, mode='w') # logging to file
+        f_handle.setLevel(self.get_level(lvl))
+        f_handle.setFormatter(formatter)
+        self.logger.addHandler(f_handle)
+        
+        if verbose: 
+            # also print to terminal 
+            s_handle = logging.StreamHandler()
+            s_handle.setLevel(self.get_level(lvl))
+            s_handle.setFormatter(formatter)
+            self.logger.addHandler(s_handle)
+        
+        self.running = True
+    
+    def log(self, msg: str, lvl: str):
+        '''
+        log message
+        '''
+        if self.running: 
+            if lvl == 'debug':
+                self.logger.debug(msg)
+            elif lvl == 'info':
+                self.logger.info(msg)
+            elif lvl == 'warning':
+                self.logger.warning(msg)
+            elif lvl == 'error':
+                self.logger.error(msg)
+            elif lvl == 'critical':
+                self.logger.critical(msg)
+            else:
+                raise ValueError('Logger does not recognize level: {}'.format(lvl))
+
+class SingleTFA:
+
+    def __init__(self, temp: sp.Spec, obs: sp.Spec, 
+                 cfg: cp.ConfigParser, log:logging.Logger):
         '''
         Constructor
         '''
+        # the template and observation spectrum 
         self.temp = temp
         self.obs = obs
+        self.ord_range = mc.ord_range
 
-        self.m = m
-        self.res = tr.TFAResult(m, obs.julian_day)
+        # default parameter values, unless modified by 
+        # a configuration file, if provided
+        self.m = 3         # blaze polynomial order
+        self.max_iter = 50 # maximum allowed steps 
+
+        self.logger = log # object for logging. Should have been initialized on top level
+        self.debugger = Debugger(self.m) # object for debugging purposes
+
+        # each file is identified by their julian date in normal mode
+        # in debug mode each file name is also saved
+
+        self.res = tr.TFAOrderResult(self.m, obs.julian_day)
         self.outlier = rmo.RemoveOutlier()
+
+        # a configuration file is provided
+        # set up any values that are not default
+        if cfg != None:
+            self.parse_config(cfg)
+
+    def parse_config(self, config:cp.ConfigParser) -> None:
+        '''
+
+        '''
+        try: # set parameters
+            self.m = int(config.get('PARAM', 'blaze_deg'))
+            self.max_iter = int(config.get('PARAM', 'max_nstep'))
+        except: 
+            pass
+
+        try: # update debug related configs
+            if config.getboolean('DEBUG', 'debug'):
+                names = (self.obs.filename, self.temp.filename)
+                Norder = range(72)
+                debug_path = config.get('DEBUG', 'debug_path')
+                debug_path += '/{}.xlsx'.format(self.obs.julian_day.isot)
+                self.debugger.start(names, debug_path, Norder)
+                self.logger.log('debug files are saved to folder {}'.format(
+                    debug_path
+                ), 'debug')
+        except:
+            print(sys.exc_info())    
 
     def run(self):
         '''
-        Run the template fitting algorithm 
+        Run the template fitting algorithm on all orders
         '''
+        complete = len(mc.ord_range)
         for i, order in enumerate(mc.ord_range): 
             a, err, s, it = self.solve_order(order)
-            self.res.append(a, err, s, it)
+            # only record alpha_v in final result
+            inter_res = np.asarray([a, err, s, it])
+            self.res.append(order, inter_res)
+            self.debugger.record(order, '{}'.format)
+            self.logger.log('({}/{}) Finished solving order {}'.format(i, complete, order), 'debug')
         return self.res
         
 
@@ -138,6 +262,7 @@ class TFA:
         
         # Final form of eqn 1
         R = F_av - f_corr
+        X2 = np.sum(np.multiply(w, np.square(R)))
 
         ## calculate partial derivatives
         # eqn 3-4
@@ -162,13 +287,13 @@ class TFA:
             b_l[i] = -np.sum(np.multiply(w, np.multiply(dR_dm[i], R)))
 
         da = np.linalg.solve(A_lk, b_l)
-        return da, R, A_lk
+        return da, R, A_lk, X2
 
     def solve_order(self, order: int): 
         '''
 
         '''
-        wave, flux = self.temp.get_order(order)
+        _, flux = self.temp.get_order(order)
         flux = self.correct(flux)
 
         w = np.sqrt(flux)
@@ -184,52 +309,149 @@ class TFA:
         iteration = 0
         # Convergence criteria
         converge = False
+        success = True
         err_v = 1
 
-        while not converge: # convergence criteria specified in 2.1.5
-            # solve
+        while not converge and success: # convergence criteria specified in 2.1.5
+            ## solve
+            iteration += 1
+
             w = self.correct(w)
             try:
-                da, R, A_lk = self.solve_step(order, a, w)
+                da, R, A_lk, X2 = self.solve_step(order, a, w)
             except(np.linalg.LinAlgError):
+                # this happens if the next step failed to compute
                 success = False
-                break
-            if len(R) == 1:
-                # This happens when a initial guess is too far from the minimum
+                exit_msg = 'LinAlg error encountered when solving step {}'.format(iteration)
+            if iteration > self.max_iter:
+                # infinite loop (potentialy)
                 success = False
-                break
+                exit_msg = 'maximum allowed iteration reached: {}'.format(self.max_iter)
 
-            # update
-            # not removing outliers as in the IDL file
-            da = np.reshape(da, a.shape)
-            da[0] *= -1.0 # still have no idea why we negate this
-            a += da
+            ## update
+            # only update if operation is successful
+            if success:
+                # update alpha
+                da = np.reshape(da, a.shape)
+                da[0] *= -1.0 # still have no idea why we negate this
+                a += da
 
-            R_sig = np.std(R)
-            k = np.divide(R_sig, np.sqrt(f_mean))  # kappa in 2.1.2
-            w = np.reciprocal(np.multiply(np.square(k), flux))
+                # update weights
+                R_sig = np.std(R)
+                k = np.divide(R_sig, np.sqrt(f_mean))  # kappa in 2.1.2
+                w = np.reciprocal(np.multiply(np.square(k), flux))
 
-            error = np.sqrt(np.linalg.inv(A_lk).diagonal())
-            err_v = np.multiply(error[0], mc.C_SPEED)
+                # remove outlier
+                bad = self.outlier.sigma_clip(R, 4)
+                w[bad] = 0
 
-            # remove outlier
-            bad = self.outlier.sigma_clip(R, 4)
-            w[bad] = 0
+                # compute errors and convergence
+                error = np.sqrt(np.linalg.inv(A_lk).diagonal())
+                err_v = np.multiply(error[0], mc.C_SPEED)
+                con_val = da * mc.C_SPEED
+
+                # converge criteria 
+                converge = np.all(con_val < 1e-6)
 
             # record:
-            # --TODO--
-            # print('[{}] a={}, da={}, k={}'.format(iteration, a, da, k))
-            iteration += 1
-            if iteration > 50:
-                # print("[{}] Failed: Infinite loop".format(order))
-                success = False
-                break
-
-            converge = abs(da[0]*mc.C_SPEED) < 1e-6
-            for i in range(0, self.m+1):
-                converge &= abs(da[i+1]*mc.C_SPEED) < 1e-6
+                if success: 
+                    result = np.asarray([a, da, err_v, con_val[0], k, X2])
+                    self.debugger.append_result(order, iteration, result)
+                    msg = '[{}] finished iteration {} successfully. X2 = {:.1f}'.format(order, iteration, X2)
+                    self.logger.log(msg, 'debug')
+                else: 
+                    self.debugger.log_exit(order, exit_msg)
+                    self.logger.log('[{}] '.format(order) + exit_msg, 'warning')
 
         return a, err_v, success, iteration
+
+class TFAModule:
+
+    def __init__(self, config_file: str = None):
+
+        self.logger = Logger()
+
+        if config_file != None:
+            self.cfg = cp.ConfigParser(comment_prefixes='#')
+            self.cfg.read(config_file)
+            self.parse_config(self.cfg)
+        
+        self.pre = pc.ProcessSpec()
+        self.post = ppc.PostProcess()
+
+        self.res = tr.TFAFinalResult()
+
+    def parse_config(self, config: cp.ConfigParser) -> None:
+        '''
+        get all logging related configurations
+        '''
+        try: # logging related configs
+            if config.getboolean('LOGGER', 'log'):
+                log_path = config.get('LOGGER', 'log_path')
+                log_level = config.get('LOGGER', 'log_level')
+                verbose = config.getboolean('LOGGER', 'log_verbose')
+                self.logger.start(log_path, log_level, verbose)
+                # by this point the logger should have started, so we 
+                # can start logging 
+                msg = 'Beginning logger instance. log_path = {}, log_vele = {}'.format(
+                    log_path, log_level
+                )
+                self.logger.log(msg, 'info')
+        except:
+            pass
+
+    def make_template(self, prelim:str, flist:list) -> sp.Spec:
+        # Initialize the preliminary as the template
+
+        name = prelim.split('/')[-1]
+        self.logger.log('beginning to create template', 'info')
+        self.logger.log('preliminary file used: {}'.format(name), 'info')
+        SP = sp.Spec(filename=prelim)
+        SP = self.pre.run(SP) 
+
+        n_files = len(flist)
+        # get the wavelength and specs of the preliminary  
+        # as foundation to the template
+        twave = SP._wave
+        tspec = SP._spec
+
+        # Currently just a average of all spectrum
+        # should also be taking care of the outliers (3-sigma clipping)
+        for i, file in enumerate(flist):
+            name = file.split('/')[-1]
+            self.logger.log('({}/{}) processing {}'.format(i, len(flist), name), 'info')
+            S = sp.Spec(filename=file)
+            SS = self.pre.run(S)
+            T = SingleTFA(SP, SS, self.cfg, self.logger)
+            res = T.run()
+            rel = res.res_df[['alpha', 'success']].to_records()
+            for order in rel:
+                if order[2]: #success
+                    flamb, fspec = SS.get_order(order[0])
+                    fspec2 = np.interp(twave[order[0], :], flamb, fspec)
+                    tspec[order[0], :] += fspec2
+                else: 
+                    n_files -= 1
+        tspec = np.divide(tspec, n_files)
+        self.logger.log('finised making templated', 'info')
+        return sp.Spec(data=(twave, tspec))
+
+    def calc_velocity(self, temp: str, flist:list):
+        '''
+
+        '''
+        self.logger.log('beginning to calculate radial velocity', 'info')
+        for i, file in enumerate(flist):
+            name = file.split('/')[-1]
+            self.logger.log('({}/{}) processing {}'.format(i, len(flist), name), 'info')
+            S = sp.Spec(filename=file)
+            SS = self.pre.run(S)
+
+            T = SingleTFA(temp, SS, self.cfg, self.logger)
+            r = T.run()
+            self.res.append(i, r.write_to_final())
+        self.logger.log('finised making templated', 'info')
+        return self.res
 
 
 if __name__ == '__main__':

@@ -3,6 +3,7 @@ import common.macro as mc
 import copy
 import typing as tp
 from astropy.io import fits
+from astropy.time import Time
 import numpy as np
 import scipy.ndimage as img
 
@@ -34,7 +35,6 @@ class Spec:
         self._spec = np.zeros(mc.ECHELLE_SHAPE)
         self.NOrder = mc.ECHELLE_SHAPE[0]
         self.NPixel = mc.ECHELLE_SHAPE[1]
-        self.julian_day = 0
 
         # If the data is generated from a .fits file, 
         # self.filename contains the .fits file destination 
@@ -52,7 +52,12 @@ class Spec:
             # a file is specified, so read data from that file 
             # prioritize data from file, so overlook any xy data 
             self.read_from(filename)
-            self.julian_day = self.header['eso drs bjd']
+            try: 
+                # Each file must have a julian date 
+                self.julian_day = Time(self.header['eso drs bjd'], format='jd')
+            except: 
+                print('what')
+                exit(-1)
             self.flag['from_file'] = True
         elif data != None:
             # no filename is specified and a set of data is provided
