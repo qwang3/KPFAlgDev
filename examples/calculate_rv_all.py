@@ -18,19 +18,22 @@ if __name__ == '__main__':
 
     warnings.filterwarnings('ignore', category=RuntimeWarning)
 
-    f_path = 'data/HARPS_Barnards_Star_benchmark'
-    ref_path = 'data/HARPS_Barnards_Star_benchmark/reference.dat'
+    f_path = 'data/HARPS_Tau_Ceti_all'
     config_path = 'examples/debug.cfg'
-    temp_path = 'template.fits'
+    temp_path = 'template_tau_ceti.fits'
 
     f_list = mc.findfiles(f_path, '_e2ds_A.fits')
-    prelim = tf.prob_for_prelim(f_list)
+
     tfa_module = tf.TFAModule(config_file=config_path)
 
-    temp = sp.Spec(filename=temp_path)
-    
+    # temp = sp.Spec(filename=temp_path)
+    prelim = tf.prob_for_prelim(f_list)
+    temp = tfa_module.make_template(prelim, f_list)
+    temp.write_to(temp_path, 3)
+
     result = tfa_module.calc_velocity(temp, f_list)
     result.convert_to_ms()
+
     t1 = time.time()
     print('Total time: {:.4f}'.format(t1 - t0))
     print(result.res_df)

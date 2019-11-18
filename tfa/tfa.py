@@ -3,7 +3,7 @@ import scipy.interpolate as ip
 import configparser as cp
 import pandas as pd
 
-import sys
+import sys, os
 import logging
 
 from common import macro as mc
@@ -51,10 +51,10 @@ class Debugger:
         '''
         self.obs_name, self.temp_name = fname
         self.path = debug_path
-        self.xlsx_writer = pd.ExcelWriter(self.path, engine='xlsxwriter')
+        self.xlsx_writer = pd.ExcelWriter(self.path + '.xlsx', engine='xlsxwriter')
         self.result = {}
         for o in order:
-            self.result[o] = tr.TFADebugRes(o, self.m)
+            self.result[o] = tr.TFADebugRes(self.obs_name, self.temp_name, o, self.m)
         
         self.running = True
         
@@ -65,6 +65,13 @@ class Debugger:
         if self.running:
             assert(len(result) == 6)
             self.result[order].append(iteration, result)
+    
+    def append_weight(self, order: int, weight: np.ndarray) -> None:
+        '''
+        record weight 
+        '''
+        if self.running:
+            self.result[order].append_weight(weight)
     
     def log_exit(self, order: int, msg:str) -> None:
         '''
@@ -78,7 +85,7 @@ class Debugger:
         
         '''
         if self.running:
-            self.result[order].record(self.xlsx_writer)
+            self.result[order].record(self.xlsx_writer, self.path + '.dat')
 
 class Logger: 
 
@@ -185,12 +192,13 @@ class SingleTFA:
             if config.getboolean('DEBUG', 'debug'):
                 names = (self.obs.filename, self.temp.filename)
                 Norder = range(72)
-                debug_path = config.get('DEBUG', 'debug_path')
-                debug_path += '/{}.xlsx'.format(self.obs.julian_day.isot)
-                self.debugger.start(names, debug_path, Norder)
-                self.logger.log('debug files are saved to folder {}'.format(
-                    debug_path
-                ), 'debug')
+                self.debug_path = config.get('DEBUG', 'debug_path')
+                name = os.path.basename(self.obs.filename)
+                self.debug_path += '/{}'.format(os.path.splitext(name)[0])
+                self.debugger.start(names, self.debug_path, Norder)
+                self.logger.log('debug files saved to {}'.format(
+                    self.debug_path
+                ), 'info')
         except:
             print(sys.exc_info())    
 
@@ -198,26 +206,14 @@ class SingleTFA:
         '''
         Run the template fitting algorithm on all orders
         '''
-        complete = len(mc.ord_range)
+        
         for i, order in enumerate(mc.ord_range): 
             a, err, s, it = self.solve_order(order)
             # only record alpha_v in final result
             inter_res = np.asarray([a, err, s, it])
             self.res.append(order, inter_res)
             self.debugger.record(order, '{}'.format)
-            self.logger.log('({}/{}) Finished solving order {}'.format(i, complete, order), 'debug')
         return self.res
-        
-
-    def common_range(self, x, y, w) -> mc.EchellePair_TYPE:
-        '''
-        
-        '''
-        idx = np.where(np.logical_and(
-            x < np.amax(y),
-            x > np.amin(y)
-        ))
-        return x[idx], w[idx]
 
     def correct(self, w):
         '''any nonvalid weight is set to zero'''
@@ -240,12 +236,11 @@ class SingleTFA:
         # overlapping interval between tspec (F) and observed(f)
         # we can only compare the two in this interval
         # print(av_lamb.size, flamb.size)
-        lamb, w= self.common_range(flamb, av_lamb, w0)
+        lamb, w= mc.common_range(flamb, av_lamb, w0)
         tckF = ip.splrep(av_lamb, tspec)
         tckf = ip.splrep(flamb,fspec)
         F_av = ip.splev(lamb, tckF)
         f = ip.splev(lamb, tckf)
-
 
         # create f[lamb]*sum(a_m * (lamb - lamb_c)) in eqn 1
         am = a[1:]            # polynomial coefficients [a_0, a_1, ... a_m]
@@ -297,36 +292,50 @@ class SingleTFA:
         flux = self.correct(flux)
 
         w = np.sqrt(flux)
+        ## Trying no weighting
+        w = np.ones_like(w)
         w = self.correct(w)
         # average flux of yje prder
         f_mean = np.sqrt(np.mean(flux))
         success = True
 
-        # Initial alpha
+        ## Initial values
         a = np.asarray([1,1] + [0] *self.m, dtype=np.float64)
         da = np.asarray([np.inf]*(self.m+2), dtype=np.float64)
+        err_v = 1
+        err_prev = np.inf
         # Keep track of number of iterations to convergence
         iteration = 0
         # Convergence criteria
+        con_val = np.asarray([np.inf]*(self.m+2), dtype=np.float64)
         converge = False
         success = True
-        err_v = 1
+        # values for record
+        k = 1
+        X2 = np.inf
+        exit_msg = ''
+        # log initial conditions:
+        result = np.asarray([a, da, err_v, con_val[0], k, X2])
+        self.debugger.append_result(order, 0, result)
+        self.debugger.append_weight(order, w)
+        
 
-        while not converge and success: # convergence criteria specified in 2.1.5
-            ## solve
+        while converge != True and success == True: # convergence criteria specified in 2.1.5
             iteration += 1
-
             w = self.correct(w)
+
+            ## solve
             try:
                 da, R, A_lk, X2 = self.solve_step(order, a, w)
             except(np.linalg.LinAlgError):
                 # this happens if the next step failed to compute
                 success = False
-                exit_msg = 'LinAlg error encountered when solving step {}'.format(iteration)
+                exit_msg = '[{}] LinAlg error encountered when solving step {}'.format(order, iteration)
+
             if iteration > self.max_iter:
                 # infinite loop (potentialy)
                 success = False
-                exit_msg = 'maximum allowed iteration reached: {}'.format(self.max_iter)
+                exit_msg = '[{}] maximum allowed iteration reached: {}'.format(order, self.max_iter)
 
             ## update
             # only update if operation is successful
@@ -337,32 +346,45 @@ class SingleTFA:
                 a += da
 
                 # update weights
-                R_sig = np.std(R)
-                k = np.divide(R_sig, np.sqrt(f_mean))  # kappa in 2.1.2
-                w = np.reciprocal(np.multiply(np.square(k), flux))
+                ## Try to update the noise only after the first iteration 
+                if iteration > 1: 
+                    R_sig = np.std(R)
+                    k = np.divide(R_sig, np.sqrt(f_mean))  # kappa in 2.1.2
+                    # w = np.reciprocal(np.multiply(np.square(k), flux))
 
-                # remove outlier
-                bad = self.outlier.sigma_clip(R, 4)
-                w[bad] = 0
+                    # remove outlier
+                    bad = self.outlier.sigma_clip(R, 3)
+                    # w[bad] = 0
 
                 # compute errors and convergence
                 error = np.sqrt(np.linalg.inv(A_lk).diagonal())
                 err_v = np.multiply(error[0], mc.C_SPEED)
-                con_val = da * mc.C_SPEED
+                con_val = abs(da * mc.C_SPEED)
 
                 # converge criteria 
-                converge = np.all(con_val < 1e-6)
+                converge = con_val[0] < 1e-7
+                # converge = abs(err_v -err_prev) < 1e-6
+                # err_prev = err_v
 
-            # record:
-                if success: 
-                    result = np.asarray([a, da, err_v, con_val[0], k, X2])
-                    self.debugger.append_result(order, iteration, result)
-                    msg = '[{}] finished iteration {} successfully. X2 = {:.1f}'.format(order, iteration, X2)
-                    self.logger.log(msg, 'debug')
-                else: 
-                    self.debugger.log_exit(order, exit_msg)
-                    self.logger.log('[{}] '.format(order) + exit_msg, 'warning')
+            ## record:
+            if success: 
+                result = np.asarray([a, da, err_v, con_val[0], k, X2])
+                self.debugger.append_result(order, iteration, result)
+                self.debugger.append_weight(order, w)
+                msg = '[{}] finished iteration {} successfully. X2 = {:.1f}'.format(order, iteration, X2)
+                self.logger.log(msg, 'debug')
+            else: 
+                self.debugger.log_exit(order, exit_msg)
+                self.logger.log(exit_msg, 'warning')
+                break
 
+        # record final result
+        if success: 
+            result = np.asarray([a, da, err_v, con_val[0], k, X2])
+            self.debugger.append_result(order, 'final', result)
+            self.debugger.append_weight(order, w)
+            msg = '[{}] finished order {} successfully. Final X2 = {:.1f}'.format(order, order, X2)
+            self.logger.log(msg, 'debug')
         return a, err_v, success, iteration
 
 class TFAModule:
@@ -422,7 +444,7 @@ class TFAModule:
             self.logger.log('({}/{}) processing {}'.format(i, len(flist), name), 'info')
             S = sp.Spec(filename=file)
             SS = self.pre.run(S)
-            T = SingleTFA(SP, SS, self.cfg, self.logger)
+            T = SingleTFA(SP, SS, None, self.logger)
             res = T.run()
             rel = res.res_df[['alpha', 'success']].to_records()
             for order in rel:
@@ -434,7 +456,7 @@ class TFAModule:
                     n_files -= 1
         tspec = np.divide(tspec, n_files)
         self.logger.log('finised making templated', 'info')
-        return sp.Spec(data=(twave, tspec))
+        return sp.Spec(data=(twave, tspec), jd=SP.julian_day)
 
     def calc_velocity(self, temp: str, flist:list):
         '''
@@ -450,7 +472,7 @@ class TFAModule:
             T = SingleTFA(temp, SS, self.cfg, self.logger)
             r = T.run()
             self.res.append(i, r.write_to_final())
-        self.logger.log('finised making templated', 'info')
+        self.logger.log('finised calculating velocity', 'info')
         return self.res
 
 

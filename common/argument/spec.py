@@ -18,7 +18,8 @@ class Spec:
     '''
 
     def __init__(self, data: mc.EchellePair_TYPE=None, 
-                       filename: str=None) -> None:
+                       filename: str=None,
+                       jd: Time=None) -> None:
         '''
         Constructor of the Spec Class 
         '''
@@ -74,6 +75,7 @@ class Spec:
                 self._spec = data[1]
                 self.NOrder, self.NPixel = self._wave.shape
                 self.NPixel = mc.ECHELLE_SHAPE[1]
+                self.julian_day = jd
                 self.flag['from_array'] = True
         else: 
             # in this case nothing is given 
@@ -147,7 +149,7 @@ class Spec:
         hdu_header.set(deg_key, deg)
 
         hdu_header.set('hierarch eso drs berv', 0)
-        hdu_header.set('hierarch eso drs bjd', self.julian_day)
+        hdu_header.set('hierarch eso drs bjd', self.julian_day.jd)
 
         # Record polynomial interpolation results to headers
         for order in range(self.NOrder):

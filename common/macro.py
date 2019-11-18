@@ -28,3 +28,14 @@ def findfiles(fpath, extension):
         for filename in [f for f in filenames if f.endswith(extension)]:
             lst_fname.append(os.path.join(dirpath, filename))
     return lst_fname
+
+
+def common_range(x, y, w) -> EchellePair_TYPE:
+    '''
+    find the common range of values between x, y
+    '''
+    idx = np.where(np.logical_and(
+        x < np.amax(y),
+        x > np.amin(y)
+    ))
+    return x[idx], w[idx]

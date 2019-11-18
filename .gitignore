@@ -6,3 +6,7 @@ __pycache__
 
 log
 debug
+data
+*.csv
+*.dat
+*.fits
