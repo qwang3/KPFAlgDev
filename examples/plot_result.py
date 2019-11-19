@@ -16,8 +16,8 @@ if __name__ == '__main__':
     RO = rmo.RemoveOutlier()
 
     # ref_path = 'data/HARPS_Barnards_Star_benchmark/reference.dat'
-    # ref_path = 'ref.dat'
-    ref_path = 'tau_ceti_ref.dat'
+    ref_path = 'ref.dat'
+    # ref_path = 'tau_ceti_ref.dat'
 
     result_file = 'result.csv'
 
@@ -35,9 +35,9 @@ if __name__ == '__main__':
     my_res[:, 1] *= -1
     year = np.divide(my_res[:, 0] - my_res[0, 0], 365.25) 
     offset = np.multiply(year, mc.SEC_ACC*1000)
-    # my_res[:, 1] -= offset
-    bad_mine = RO.sigma_clip(my_res[:, 1], 1)
-    my_res[:, 1][bad_mine] = 0
+    my_res[:, 1] -= offset
+    # bad_mine = RO.sigma_clip(my_res[:, 1], 1)
+    # my_res[:, 1][bad_mine] = 0
 
     my_res[:, 1] -= np.mean(my_res[:, 1])
     sig_mine = np.std(my_res[:, 1])
@@ -45,9 +45,9 @@ if __name__ == '__main__':
     # Reference data
     ref = np.loadtxt(ref_path)
     ref = np.asarray([list(pair) for pair in sorted(zip(ref[:, 0], ref[:, 1]))])
-    # ref[:, 1] -= offset
-    bad_ref = RO.sigma_clip(ref[:, 1], 1)
-    ref[:, 1][bad_ref] = 0
+    ref[:, 1] -= offset
+    # bad_ref = RO.sigma_clip(ref[:, 1], 1)
+    # ref[:, 1][bad_ref] = 0
 
     ref[:, 1] -= np.mean(ref[:, 1])
     sig_ref = np.std(ref[:, 1])
