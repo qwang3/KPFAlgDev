@@ -1,0 +1,9 @@
+DO action_A
+IF ( val > 0 ) {
+    DO action_A
+} ELSE IF ( val == 0 ) {
+    DO action_B
+} ELSE {
+    DO action_A
+    DO action_B
+}

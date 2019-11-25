@@ -15,7 +15,7 @@ import tfa.tfa as tf
 
 if __name__ == '__main__':
     t0 = time.time()
-
+    print('Starting calculate_rv_all.py...')
     warnings.filterwarnings('ignore', category=RuntimeWarning)
 
     f_path = 'data/HARPS_Tau_Ceti_all'

@@ -1,0 +1,11 @@
+DO action_A
+DO action_B
+WHILE ( val > -100 ) {
+    IF ( val > -50 ) {
+        DO action_C
+    } ELSE IF ( val > -70 ) {
+        DO action_B
+    } 
+    DO action_B
+}
+DO action_D
