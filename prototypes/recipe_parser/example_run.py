@@ -15,4 +15,3 @@ if __name__ == '__main__':
     Recipe = ro.RecipeObject(a)
     Recipe.read_recipe(recipe_path)
     Recipe.execute(a, receipt_path)
- 
