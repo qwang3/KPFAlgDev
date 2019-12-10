@@ -1,0 +1,2 @@
+1. Better error handling: 
+	example: when reading the config file, make sure that the manditory variables are actually there before proceeding with the framework

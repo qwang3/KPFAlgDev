@@ -1,0 +1,6 @@
+Modifications
+
+Suggestions:
+1. use typing when defining python functions (PEP-484)
+2. make recipe and config files mandatory input argument for command lines
+3. install from source into virtual enviroment
